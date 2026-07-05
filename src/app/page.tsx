@@ -4,8 +4,19 @@ import { useState, useCallback } from 'react';
 import { DropZone } from '@/components/DropZone';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { LoadingScreen } from '@/components/LoadingScreen';
+import { DecryptDialog } from '@/components/DecryptDialog';
 import { VideoSequence, ProcessingProgress } from '@/types/video';
 import { processFilesToMoments, detectSequences } from '@/lib/sequence-detector';
+import {
+  isEncryptedTeslaFile,
+  parseTeslaHeader,
+  fetchDecryptKeys,
+  decryptTeslaFile,
+  loadStoredToken,
+  saveStoredToken,
+  clearStoredToken,
+  KeyFetchError,
+} from '@/lib/tesla-decrypt';
 
 export default function Home() {
   const [sequences, setSequences] = useState<VideoSequence[]>([]);
@@ -16,30 +27,27 @@ export default function Home() {
     current: 0,
     total: 0,
   });
+  // Encrypted clips awaiting a token before they can be decrypted.
+  const [pendingDecrypt, setPendingDecrypt] = useState<{ encrypted: File[]; plain: File[] } | null>(
+    null
+  );
 
-  const handleFilesAdded = useCallback(async (newFiles: File[]) => {
-    if (newFiles.length === 0) return;
+  // Run the normal processing pipeline on a set of plain (decrypted) MP4 files.
+  const runPipeline = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
 
-    // Start processing
     setIsProcessing(true);
     setProcessingProgress({
       stage: 'scanning',
       current: 0,
-      total: newFiles.length,
+      total: files.length,
       message: 'Scanning files...',
     });
 
     try {
-      // Process files into moments (also parses event.json files)
-      const { moments, events } = await processFilesToMoments(newFiles, setProcessingProgress);
-
-      // Detect sequences from moments, matching events to sequences
+      const { moments, events } = await processFilesToMoments(files, setProcessingProgress);
       const detectedSequences = detectSequences(moments, events);
-
-      // Update state
       setSequences(detectedSequences);
-
-      // Auto-select first sequence if none selected
       if (detectedSequences.length > 0) {
         setSelectedSequence(detectedSequences[0]);
       }
@@ -48,13 +56,84 @@ export default function Home() {
       setProcessingProgress({
         stage: 'error',
         current: 0,
-        total: newFiles.length,
+        total: files.length,
         message: 'Error processing videos',
       });
     } finally {
       setIsProcessing(false);
     }
   }, []);
+
+  const handleFilesAdded = useCallback(
+    async (newFiles: File[]) => {
+      if (newFiles.length === 0) return;
+
+      // Split off any Tesla-encrypted clips; they need a key before playback.
+      const encrypted: File[] = [];
+      const plain: File[] = [];
+      for (const file of newFiles) {
+        if (file.name.toLowerCase().endsWith('.mp4') && (await isEncryptedTeslaFile(file))) {
+          encrypted.push(file);
+        } else {
+          plain.push(file);
+        }
+      }
+
+      if (encrypted.length > 0) {
+        // Prompt for the Tesla token; decryption continues in handleDecrypt.
+        setPendingDecrypt({ encrypted, plain });
+        return;
+      }
+
+      await runPipeline(newFiles);
+    },
+    [runPipeline]
+  );
+
+  // Called by the decrypt dialog: fetch keys, decrypt every encrypted clip in
+  // the browser, then hand the resulting plain MP4s to the normal pipeline.
+  const handleDecrypt = useCallback(
+    async (
+      token: string,
+      remember: boolean,
+      onProgress: (label: string, fraction: number) => void
+    ) => {
+      if (!pendingDecrypt) return;
+      const { encrypted, plain } = pendingDecrypt;
+
+      const buffers = await Promise.all(
+        encrypted.map(async (f) => new Uint8Array(await f.arrayBuffer()))
+      );
+      const headers = buffers.map(parseTeslaHeader);
+
+      onProgress('Fetching keys from Tesla…', 0);
+      const keys = await fetchDecryptKeys(headers, token, (done, total) => {
+        if (total > 1) onProgress(`Fetching keys from Tesla… (batch ${done}/${total})`, 0);
+      });
+
+      const decryptedFiles: File[] = [];
+      for (let i = 0; i < encrypted.length; i++) {
+        const key = keys.get(headers[i].id);
+        if (!key) {
+          throw new KeyFetchError(
+            `Tesla didn't return a key for "${encrypted[i].name}". The token may lack access to this vehicle.`
+          );
+        }
+        const label = `Decrypting ${encrypted[i].name} (${i + 1}/${encrypted.length})…`;
+        const blob = await decryptTeslaFile(buffers[i], key, (frac) => onProgress(label, frac));
+        decryptedFiles.push(new File([blob], encrypted[i].name, { type: 'video/mp4' }));
+      }
+
+      // Persist or forget the token per the user's choice.
+      if (remember) saveStoredToken(token);
+      else clearStoredToken();
+
+      // Success: close the dialog and process the decrypted clips + any plain ones.
+      setPendingDecrypt(null);
+      void runPipeline([...plain, ...decryptedFiles]);
+    },
+    [pendingDecrypt, runPipeline]
+  );
 
   const handleClear = useCallback(() => {
     setSequences([]);
@@ -65,6 +144,21 @@ export default function Home() {
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Loading Screen */}
       {isProcessing && <LoadingScreen progress={processingProgress} />}
+
+      {/* Decrypt prompt for encrypted Tesla clips */}
+      {pendingDecrypt && (
+        <DecryptDialog
+          fileCount={pendingDecrypt.encrypted.length}
+          initialToken={loadStoredToken() ?? ''}
+          onCancel={() => {
+            // Skip decryption, but still play any plain clips dropped alongside.
+            const plain = pendingDecrypt.plain;
+            setPendingDecrypt(null);
+            if (plain.length > 0) void runPipeline(plain);
+          }}
+          onDecrypt={handleDecrypt}
+        />
+      )}
 
       {/* Main Content - Full width, no header */}
       <main className="p-4">
