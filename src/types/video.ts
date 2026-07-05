@@ -29,7 +29,7 @@ export interface VideoMoment {
 
 /** Processing progress state */
 export interface ProcessingProgress {
-  stage: 'scanning' | 'metadata' | 'ready' | 'error';
+  stage: 'scanning' | 'decrypting' | 'metadata' | 'ready' | 'error';
   current: number;         // Current file being processed
   total: number;           // Total files to process
   message?: string;        // Optional status message

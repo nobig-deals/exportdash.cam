@@ -16,6 +16,7 @@
 - **Interactive Map** — Live GPS tracking synced with video playback
 - **Event Timeline** — Visual timeline showing brake, gas, turn signals, and steering events
 - **Video Export** — Export clips with telemetry burned into the video
+- **Encrypted Clip Support** — Decrypt Tesla 2026.20+ encrypted recordings in-browser using your Tesla account token
 - **100% Client-Side** — All processing happens in your browser, no uploads required
 
 ## Deploy
@@ -87,6 +88,35 @@ Clip 5: 10:34:00 (60s) ─┘
 Clip 6: 10:45:00 (60s) ─→ New sequence (12min gap)
 ```
 
+## Encrypted Clips (firmware 2026.20+)
+
+Recent Tesla firmware encrypts dashcam and Sentry recordings on the USB drive.
+When you drop encrypted clips, ExportDash detects them and offers to decrypt
+them in your browser:
+
+1. Sign in at [dashcam.tesla.com](https://dashcam.tesla.com) and grab your
+   dashcam token from DevTools → Network → any `/api/1/` request →
+   `Authorization: Bearer …`.
+2. Paste it into the prompt. ExportDash fetches the per-file decryption keys from
+   Tesla and decrypts the video locally.
+
+**How it stays private:**
+
+- Your video **never leaves your device** — decryption runs entirely in the
+  browser using the native WebCrypto AES engine.
+- Only per-file identifiers and ownership metadata (never footage) are sent to
+  Tesla to retrieve the decryption keys — exactly what Tesla's own web viewer
+  sends.
+- Your token is stored only in your browser (localStorage, opt-in "remember")
+  and is sent only to Tesla. Treat it like a password; it expires periodically.
+
+**Why a proxy:** browsers can't call `dashcam.tesla.com` directly from another
+origin (CORS). The key request is routed same-origin through a thin reverse
+proxy that forwards only to Tesla — the Next.js dev server handles this locally,
+and nginx handles it in production (see `nginx.conf`). Point it elsewhere with
+`NEXT_PUBLIC_TESLA_KEY_URL` if needed. The proxy adds no credentials of its own;
+it only relays your authenticated request to Tesla.
+
 ## Tech Stack
 
 - **Framework:** Next.js 15 with App Router
@@ -123,11 +153,14 @@ src/
 │   ├── MapView.tsx       # GPS map overlay
 │   ├── VideoExporter.tsx # WebCodecs-based export
 │   ├── DropZone.tsx      # File/folder drop handling
+│   ├── DecryptDialog.tsx # Encrypted-clip token prompt & decrypt progress
 │   └── LoadingScreen.tsx # Processing progress UI
 ├── hooks/
 │   └── useSeiData.ts     # SEI extraction & time sync
 ├── lib/
 │   ├── dashcam-mp4.ts    # MP4 parsing & SEI extraction
+│   ├── tesla-crypto.ts   # MD5 + AES-128-CBC primitives (verified vs test vectors)
+│   ├── tesla-decrypt.ts  # Encrypted container parsing, key fetch & decryption
 │   └── sequence-detector.ts # Clip merging logic
 └── types/
     └── video.ts          # TypeScript definitions
