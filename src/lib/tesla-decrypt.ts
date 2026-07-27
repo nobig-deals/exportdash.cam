@@ -28,8 +28,10 @@ import { md5, aes128CbcDecryptNoPad } from './tesla-crypto';
 /**
  * Where the browser sends the key request. A browser cannot call
  * dashcam.tesla.com directly (CORS), so by default we use a same-origin proxy
- * path that forwards to Tesla server-to-server: the Next dev server rewrites it
- * locally, and nginx proxies it in production (see next.config.ts / nginx.conf).
+ * path that forwards to Tesla server-to-server. Three deployments serve it:
+ * the Next dev server rewrites it locally (next.config.ts), a Cloudflare Pages
+ * Function handles it on exportdash.cam (functions/tesla-decrypt/[[path]].ts),
+ * and nginx proxies it in the Docker image (nginx.conf).
  * Override with NEXT_PUBLIC_TESLA_KEY_URL for other deployments.
  */
 const KEY_API_URL =
@@ -246,8 +248,20 @@ async function fetchKeyBatch(
     // or the network is down. (A direct cross-origin call to Tesla would be
     // blocked by CORS, which is why the request goes through the proxy.)
     throw new KeyFetchError(
-      `Couldn't reach the key proxy at ${KEY_API_URL}. In production nginx proxies /tesla-decrypt/ to Tesla; in local dev the Next dev server does. Make sure it's running.`,
+      `Couldn't reach the key proxy at ${KEY_API_URL}. It's served by the Next dev server locally, a Cloudflare Pages Function on exportdash.cam, and nginx in the Docker image. Make sure it's running.`,
       true
+    );
+  }
+
+  // A static host with no proxy configured answers a POST to an asset path with
+  // 405 (or a non-JSON 404) — that's the host talking, not Tesla, so don't
+  // report it as a Tesla failure.
+  const contentType = resp.headers.get('content-type') ?? '';
+  if (resp.status === 405 || (resp.status === 404 && !contentType.includes('json'))) {
+    throw new KeyFetchError(
+      `The key proxy at ${KEY_API_URL} isn't deployed — the host answered HTTP ${resp.status} for a static path instead of forwarding to Tesla.`,
+      true,
+      resp.status
     );
   }
 

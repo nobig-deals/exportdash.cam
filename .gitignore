@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# cloudflare (wrangler local state)
+/.wrangler/
+
 # production
 /build
 

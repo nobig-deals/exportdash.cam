@@ -112,10 +112,14 @@ them in your browser:
 
 **Why a proxy:** browsers can't call `dashcam.tesla.com` directly from another
 origin (CORS). The key request is routed same-origin through a thin reverse
-proxy that forwards only to Tesla — the Next.js dev server handles this locally,
-and nginx handles it in production (see `nginx.conf`). Point it elsewhere with
-`NEXT_PUBLIC_TESLA_KEY_URL` if needed. The proxy adds no credentials of its own;
-it only relays your authenticated request to Tesla.
+proxy that forwards only to Tesla — the Next.js dev server handles this locally
+(`next.config.ts`), a Cloudflare Pages Function handles it on exportdash.cam
+(`functions/tesla-decrypt/[[path]].ts`), and nginx handles it in the Docker image
+(`nginx.conf`). Point it elsewhere with `NEXT_PUBLIC_TESLA_KEY_URL` if needed.
+The proxy adds no credentials of its own; it only relays your authenticated
+request to Tesla. Note that this means your bearer token transits the proxy host
+on its way to Tesla — it is never logged or stored there, but if you'd rather it
+never left your machine, run the Docker image yourself and use that instance.
 
 ## Tech Stack
 
