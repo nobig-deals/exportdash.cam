@@ -1444,7 +1444,8 @@ export function VideoPlayer({
               speedUnit={speedUnit}
               filename={`tesla-${sequence.dateRange}-${sequence.timeRange.split(' - ')[0].replace(/:/g, '-')}`}
               trimPoints={trimPoints}
-              cameraSegments={cameraSegments}
+              // Without a custom track the exporter follows the camera picked in the toolbar
+              cameraSegments={useCustomCameraTrack ? cameraSegments : []}
               showTelemetry={showTelemetry}
               showDateTime={showDateTime}
               showMap={showMap}
