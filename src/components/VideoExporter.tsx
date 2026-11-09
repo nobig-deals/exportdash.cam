@@ -4,10 +4,13 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { IconDownload, IconPlayerStop, IconLoader2, IconCheck } from '@tabler/icons-react';
 import { SeiData, SeiWithFrameIndex } from '@/lib/dashcam-mp4';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG } from '@/types/video';
+import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG } from '@/types/video';
 import { Tooltip } from './Tooltip';
 
 type LayoutType = 'single' | 'pip' | 'triple' | 'all';
+
+// Gap between cells of the all-cameras grid, scaled to the export width
+const getAllGridGap = (width: number) => Math.max(2, Math.round(width / 480));
 
 interface VideoExporterProps {
   sequence: VideoSequence;
@@ -668,6 +671,9 @@ export function VideoExporter({
       const pipAngles = pipCorners.filter(
         a => a !== selectedAngle && a !== 'none' && a !== 'map'
       );
+      // All-cameras grid: 2 rows of 3, same order as the player
+      const allRows = [layoutConfig.all.topRow, layoutConfig.all.bottomRow];
+      const allAngles = Array.from(new Set(allRows.flat()));
 
       let width: number;
       let height: number;
@@ -704,6 +710,13 @@ export function VideoExporter({
           height = Math.floor(height * s);
         }
         width = width - (width % 2);
+        height = height - (height % 2);
+      } else if (layout === 'all') {
+        // 2 rows of 3 cells at the camera aspect ratio, so no black bands between rows
+        width = maxDimension;
+        const gap = getAllGridGap(width);
+        const cellW = (width - gap * 4) / 3;
+        height = Math.round((cellW * srcHeight / srcWidth) * 2 + gap * 3);
         height = height - (height % 2);
       } else {
         width = srcWidth;
@@ -840,6 +853,8 @@ export function VideoExporter({
         layoutAngles = tripleAngles;
       } else if (layout === 'pip') {
         layoutAngles = pipAngles;
+      } else if (layout === 'all') {
+        layoutAngles = allAngles;
       } else {
         layoutAngles = [];
       }
@@ -1100,8 +1115,61 @@ export function VideoExporter({
             }
           }
 
+        } else if (layout === 'all') {
+          // Load and seek every camera in the grid
+          for (const angle of allAngles) {
+            const ev = extraVideos[angle];
+            const video = moment.videos.find(v => v.angle === angle);
+            if (!ev || !video) continue;
+            if (ev.loadedClipIdx !== clipIdx) {
+              ev.blobUrl = await loadVideoInto(ev.el, video.file, ev.blobUrl);
+              ev.loadedClipIdx = clipIdx;
+            }
+            await seekVideoEl(ev.el, localTime);
+          }
+          await new Promise((r) => setTimeout(r, 10));
+
+          // Draw 2 rows of 3 with a small gap, matching the player grid
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          const gap = getAllGridGap(width);
+          const cellW = Math.floor((width - gap * 4) / 3);
+          const cellH = Math.floor((height - gap * 3) / 2);
+
+          for (let rowIdx = 0; rowIdx < allRows.length; rowIdx++) {
+            for (let colIdx = 0; colIdx < allRows[rowIdx].length; colIdx++) {
+              const angle = allRows[rowIdx][colIdx];
+              const cx = gap + colIdx * (cellW + gap);
+              const cy = gap + rowIdx * (cellH + gap);
+              const ev = extraVideos[angle];
+              const hasVideo = ev && ev.loadedClipIdx === clipIdx && ev.el.videoWidth > 0
+                && moment.videos.some(v => v.angle === angle);
+
+              if (hasVideo) {
+                // Fit each video into its cell preserving aspect ratio
+                const srcW = ev.el.videoWidth;
+                const srcH = ev.el.videoHeight;
+                const scale = Math.min(cellW / srcW, cellH / srcH);
+                const dw = Math.floor(srcW * scale);
+                const dh = Math.floor(srcH * scale);
+                ctx.drawImage(ev.el, cx + Math.floor((cellW - dw) / 2), cy + Math.floor((cellH - dh) / 2), dw, dh);
+              } else {
+                // Camera missing from this clip - placeholder like the player
+                ctx.fillStyle = '#111827';
+                ctx.fillRect(cx, cy, cellW, cellH);
+                ctx.fillStyle = '#4b5563';
+                ctx.font = `${Math.round(cellH * 0.06)}px system-ui, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(ANGLE_LABELS[angle] || angle, cx + cellW / 2, cy + cellH / 2);
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'alphabetic';
+              }
+            }
+          }
+
         } else {
-          // Single / All layout - export single angle
+          // Single layout - export single angle
           const needReload = currentLoadedClipIdx !== clipIdx || currentLoadedAngle !== frameAngle;
           if (needReload) {
             const video = moment.videos.find(v => v.angle === frameAngle) || moment.videos[0];
