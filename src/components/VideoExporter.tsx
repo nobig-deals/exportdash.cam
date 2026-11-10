@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { IconDownload, IconPlayerStop, IconLoader2, IconCheck, IconAlertTriangle, IconRefresh } from '@tabler/icons-react';
 import { SeiData, SeiWithFrameIndex } from '@/lib/dashcam-mp4';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG } from '@/types/video';
+import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, formatLocalDate } from '@/types/video';
 import { Tooltip } from './Tooltip';
 
 type LayoutType = 'single' | 'pip' | 'triple' | 'all';
@@ -1262,7 +1262,7 @@ export function VideoExporter({
         }
         if (showDateTime) {
           const realTime = new Date(moment.timestamp.getTime() + localTime * 1000);
-          const dynamicDate = realTime.toISOString().split('T')[0];
+          const dynamicDate = formatLocalDate(realTime);
           const dynamicTime = realTime.toTimeString().split(' ')[0];
           const autopilotState = seiData?.autopilot_state ?? 0;
           const isAutopilotActive = showTelemetry && [1, 2, 3].includes(autopilotState);

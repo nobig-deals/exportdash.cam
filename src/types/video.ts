@@ -500,6 +500,13 @@ export function formatDuration(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+/** Format a date as YYYY-MM-DD in local time (toISOString would shift it to UTC) */
+export function formatLocalDate(date: Date): string {
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 /** Format file size to human-readable string */
 export function formatFileSize(bytes: number): string {
   const sizeInMB = bytes / (1024 * 1024);

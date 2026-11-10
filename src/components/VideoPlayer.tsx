@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, lazy, Suspense, ReactNode, useMemo } from 'react';
 import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
-import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig } from '@/types/video';
+import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig, formatLocalDate } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
 import {
   IconArrowUp,
@@ -1066,7 +1066,7 @@ export function VideoPlayer({
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
                   {(() => {
                     const realTime = new Date(currentMoment.timestamp.getTime() + localTime * 1000);
-                    const date = realTime.toISOString().split('T')[0];
+                    const date = formatLocalDate(realTime);
                     const time = realTime.toTimeString().split(' ')[0];
                     return <>{date} &nbsp; {time}</>;
                   })()}
