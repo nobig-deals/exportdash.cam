@@ -394,8 +394,17 @@ export function VideoPlayer({
   const pendingRestoreRef = useRef<{ time: number; playing: boolean } | null>(null);
   const shouldAutoPlayRef = useRef(false);
 
+  // A new src or remounted <video> starts at 1x, so re-apply the chosen speed on load
+  const playbackRateRef = useRef(1);
+  const applyPlaybackRate = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    video.defaultPlaybackRate = playbackRateRef.current;
+    video.playbackRate = playbackRateRef.current;
+  }, []);
+
   const handleLoadedMetadata = useCallback(() => {
     if (mainVideoRef.current) {
+      applyPlaybackRate(mainVideoRef.current);
       const { videoWidth, videoHeight } = mainVideoRef.current;
       if (videoWidth && videoHeight) {
         setVideoAspectRatio(videoWidth / videoHeight);
@@ -423,7 +432,7 @@ export function VideoPlayer({
         shouldAutoPlayRef.current = false;
       }
     }
-  }, []);
+  }, [applyPlaybackRate]);
 
   // When moment index changes, check if we should auto-play
   useEffect(() => {
@@ -560,13 +569,10 @@ export function VideoPlayer({
 
   const handlePlaybackRateChange = useCallback((rate: number) => {
     setPlaybackRate(rate);
-    if (mainVideoRef.current) {
-      mainVideoRef.current.playbackRate = rate;
-    }
-    Object.values(videoRefs.current).forEach(v => {
-      if (v) v.playbackRate = rate;
-    });
-  }, []);
+    playbackRateRef.current = rate;
+    applyPlaybackRate(mainVideoRef.current);
+    Object.values(videoRefs.current).forEach(applyPlaybackRate);
+  }, [applyPlaybackRate]);
 
   // Skip to previous/next clip
   const skipToPreviousClip = useCallback(() => {
@@ -700,7 +706,7 @@ export function VideoPlayer({
           className="w-full h-full object-contain bg-black"
           muted={!isMain}
           onTimeUpdate={isMain ? handleTimeUpdate : undefined}
-          onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
+          onLoadedMetadata={isMain ? handleLoadedMetadata : (e) => applyPlaybackRate(e.currentTarget)}
           onEnded={isMain ? handleVideoEnded : undefined}
           onPlay={isMain ? () => setIsPlaying(true) : undefined}
           onPause={isMain ? handleMainPause : undefined}
@@ -784,7 +790,7 @@ export function VideoPlayer({
                         style={{ objectPosition: slotAlign }}
                         muted={!isMain}
                         onTimeUpdate={isMain ? handleTimeUpdate : undefined}
-                        onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
+                        onLoadedMetadata={isMain ? handleLoadedMetadata : (e) => applyPlaybackRate(e.currentTarget)}
                         onEnded={isMain ? handleVideoEnded : undefined}
                         onPlay={isMain ? () => setIsPlaying(true) : undefined}
                         onPause={isMain ? handleMainPause : undefined}
