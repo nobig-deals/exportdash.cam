@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { IconDownload, IconPlayerStop, IconLoader2, IconCheck } from '@tabler/icons-react';
+import { IconDownload, IconPlayerStop, IconLoader2, IconCheck, IconAlertTriangle, IconRefresh } from '@tabler/icons-react';
 import { SeiData, SeiWithFrameIndex } from '@/lib/dashcam-mp4';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG } from '@/types/video';
@@ -127,6 +127,7 @@ export function VideoExporter({
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const abortRef = useRef(false);
 
   // Cleanup
@@ -599,6 +600,8 @@ export function VideoExporter({
     }
 
     setIsExporting(true);
+    setIsComplete(false);
+    setExportError(null);
     setProgress(0);
     setExportUrl(null);
     abortRef.current = false;
@@ -1261,8 +1264,11 @@ export function VideoExporter({
 
     } catch (err) {
       console.error('Export error:', err);
-      setStatus(`Export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
       setIsExporting(false);
+      // Keep the dialog open with the reason, unless the user cancelled
+      if (!abortRef.current) {
+        setExportError(err instanceof Error ? err.message : 'Unknown error');
+      }
     } finally {
       // Cleanup
       if (currentBlobUrl) {
@@ -1281,6 +1287,7 @@ export function VideoExporter({
   const closeDialog = useCallback(() => {
     setIsExporting(false);
     setIsComplete(false);
+    setExportError(null);
     setProgress(0);
     setStatus('');
   }, []);
@@ -1309,13 +1316,17 @@ export function VideoExporter({
         </button>
       </Tooltip>
 
-      {(isExporting || isComplete) && (
+      {(isExporting || isComplete || exportError !== null) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
           <div className="bg-gray-900 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl border border-gray-700">
             <div className="text-center">
-              {/* Icon - spinning loader or success check */}
+              {/* Icon - spinning loader, success check or error */}
               <div className="mb-6">
-                {isComplete ? (
+                {exportError !== null ? (
+                  <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto">
+                    <IconAlertTriangle size={36} className="text-red-500" />
+                  </div>
+                ) : isComplete ? (
                   <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto">
                     <IconCheck size={40} className="text-green-500" />
                   </div>
@@ -1325,12 +1336,16 @@ export function VideoExporter({
               </div>
 
               <h3 className="text-xl font-semibold text-white mb-2">
-                {isComplete ? 'Export Complete!' : 'Exporting Video'}
+                {exportError !== null ? 'Export Failed' : isComplete ? 'Export Complete!' : 'Exporting Video'}
               </h3>
-              <p className="text-gray-400 mb-6">{status}</p>
+              {exportError !== null ? (
+                <p className="text-red-400 mb-6 break-words">{exportError}</p>
+              ) : (
+                <p className="text-gray-400 mb-6">{status}</p>
+              )}
 
-              {/* Progress bar - only show when not complete */}
-              {!isComplete && (
+              {/* Progress bar - only show while exporting */}
+              {!isComplete && exportError === null && (
                 <>
                   <div className="w-full bg-gray-700 rounded-full h-3 mb-4 overflow-hidden">
                     <div
@@ -1344,7 +1359,23 @@ export function VideoExporter({
 
               {/* Action buttons */}
               <div className="flex flex-col gap-3">
-                {isComplete ? (
+                {exportError !== null ? (
+                  <>
+                    <button
+                      onClick={startExport}
+                      className="flex items-center gap-2 justify-center w-full px-6 py-3 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-all"
+                    >
+                      <IconRefresh size={18} />
+                      Retry
+                    </button>
+                    <button
+                      onClick={closeDialog}
+                      className="px-6 py-2.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300 hover:bg-gray-600 transition-all"
+                    >
+                      Close
+                    </button>
+                  </>
+                ) : isComplete ? (
                   <>
                     <button
                       onClick={downloadExport}
@@ -1371,8 +1402,8 @@ export function VideoExporter({
                 )}
               </div>
 
-              {/* CTA - only show during export, not on success */}
-              {!isComplete && (
+              {/* CTA - only show during export, not on success or failure */}
+              {!isComplete && exportError === null && (
                 <>
                   <a
                     href="https://nobig.deals"
