@@ -182,6 +182,8 @@ export function VideoPlayer({
   const [showSafeZones, setShowSafeZones] = useState(false);
   const formatPreset = useMemo(() => getFormatPreset(format), [format]);
   const isPortraitFormat = formatPreset.aspectRatio > 0 && formatPreset.aspectRatio < 1;
+  // Camera track only drives Single and PiP layouts in landscape formats
+  const cameraTrackActive = !isPortraitFormat && (layout === 'single' || layout === 'pip');
 
   // Layout camera config
   const [layoutConfig, setLayoutConfig] = useState<LayoutCameraConfig>(DEFAULT_LAYOUT_CONFIG);
@@ -433,7 +435,7 @@ export function VideoPlayer({
   // Switch cameras based on camera segments (when custom track enabled)
   // Works both during playback AND when scrubbing timeline
   useEffect(() => {
-    if (!useCustomCameraTrack || cameraSegments.length === 0) return;
+    if (!cameraTrackActive || !useCustomCameraTrack || cameraSegments.length === 0) return;
 
     // Skip while a restore is pending — the video is remounting and localTime
     // may temporarily be 0, which would cause a false switch back
@@ -449,7 +451,7 @@ export function VideoPlayer({
       pendingRestoreRef.current = { time: localTime, playing: isPlaying };
       setSelectedAngle(currentSegment.angle);
     }
-  }, [useCustomCameraTrack, absoluteTime, cameraSegments, selectedAngle, localTime, isPlaying]);
+  }, [cameraTrackActive, useCustomCameraTrack, absoluteTime, cameraSegments, selectedAngle, localTime, isPlaying]);
 
   // Custom setters that preserve playback state
   const handleLayoutChange = useCallback((newLayout: LayoutType) => {
@@ -1587,6 +1589,7 @@ export function VideoPlayer({
             onTrimPreview={handleTrimPreview}
             cameraSegments={cameraSegments}
             onCameraSegmentsChange={setCameraSegments}
+            cameraTrackActive={cameraTrackActive}
             selectedAngle={selectedAngle}
             availableAngles={availableAngles}
           />
