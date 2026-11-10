@@ -12,6 +12,55 @@ type LayoutType = 'single' | 'pip' | 'triple' | 'all';
 // Gap between cells of the all-cameras grid, scaled to the export width
 const getAllGridGap = (width: number) => Math.max(2, Math.round(width / 480));
 
+const LAYOUT_LABELS: Record<LayoutType, string> = {
+  single: 'Single',
+  pip: 'PiP',
+  triple: 'Triple',
+  all: 'All 6',
+};
+
+// One-line summary of what an export renders, e.g. "All 6 · Original · 0:12–0:45"
+function describeExport({
+  layout,
+  format,
+  portraitLayout,
+  selectedAngle,
+  cameraSegments,
+  trimPoints,
+  totalDuration,
+}: {
+  layout: LayoutType;
+  format: FormatType;
+  portraitLayout: PortraitLayoutType;
+  selectedAngle: string;
+  cameraSegments: CameraSegment[];
+  trimPoints?: TrimPoints | null;
+  totalDuration: number;
+}): string {
+  const preset = getFormatPreset(format);
+  const isPortrait = preset.aspectRatio > 0 && preset.aspectRatio < 1;
+
+  let layoutLabel: string;
+  if (isPortrait) {
+    layoutLabel = getPortraitLayout(portraitLayout).label;
+  } else if (layout === 'single') {
+    // Single exports one camera, or follows the custom camera track
+    const angles = new Set(cameraSegments.map(s => s.angle));
+    const angle = cameraSegments[0]?.angle ?? selectedAngle;
+    layoutLabel = angles.size > 1 ? 'Camera track' : `${ANGLE_LABELS[angle] || angle} camera`;
+  } else {
+    layoutLabel = LAYOUT_LABELS[layout];
+  }
+
+  const parts = [layoutLabel, preset.label];
+  const inPoint = trimPoints?.inPoint ?? 0;
+  const outPoint = trimPoints?.outPoint ?? totalDuration;
+  if (inPoint > 0 || outPoint < totalDuration) {
+    parts.push(`${formatDuration(inPoint)}–${formatDuration(outPoint)}`);
+  }
+  return parts.join(' · ');
+}
+
 interface VideoExporterProps {
   sequence: VideoSequence;
   selectedAngle: string;
@@ -128,6 +177,7 @@ export function VideoExporter({
   const [status, setStatus] = useState('');
   const [exportUrl, setExportUrl] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSummary, setExportSummary] = useState('');
   const abortRef = useRef(false);
 
   // Cleanup
@@ -599,6 +649,16 @@ export function VideoExporter({
       return;
     }
 
+    // Snapshot what this export renders, so the dialog can show it
+    setExportSummary(describeExport({
+      layout,
+      format,
+      portraitLayout,
+      selectedAngle,
+      cameraSegments,
+      trimPoints,
+      totalDuration: sequence.totalDuration,
+    }));
     setIsExporting(true);
     setIsComplete(false);
     setExportError(null);
@@ -1276,7 +1336,7 @@ export function VideoExporter({
       }
       tempVideo.src = '';
     }
-  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig]);
+  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, cameraSegments, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig]);
 
   const stopExport = useCallback(() => {
     abortRef.current = true;
@@ -1338,6 +1398,9 @@ export function VideoExporter({
               <h3 className="text-xl font-semibold text-white mb-2">
                 {exportError !== null ? 'Export Failed' : isComplete ? 'Export Complete!' : 'Exporting Video'}
               </h3>
+              {exportSummary && (
+                <p className="text-xs text-gray-500 mb-3">{exportSummary}</p>
+              )}
               {exportError !== null ? (
                 <p className="text-red-400 mb-6 break-words">{exportError}</p>
               ) : (
