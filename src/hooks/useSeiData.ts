@@ -42,19 +42,21 @@ export function useSeiData(
   const [fps, setFps] = useState(30);
 
   const seiMetadataRef = useRef<SeiMetadataType | null>(null);
-  const lastSequenceIdRef = useRef<string | null>(null);
+  const lastSequenceKeyRef = useRef<string | null>(null);
 
   // Load protobuf schema and extract SEI messages when sequence changes
   useEffect(() => {
     if (!sequence) {
       setAllSeiMessages([]);
       setError(null);
-      lastSequenceIdRef.current = null;
+      lastSequenceKeyRef.current = null;
       return;
     }
 
-    // Skip if we already processed this sequence
-    if (lastSequenceIdRef.current === sequence.id) {
+    // Skip if we already processed this sequence with the same clips
+    // ("Add More" can extend a sequence without changing its id)
+    const sequenceKey = `${sequence.id}:${sequence.moments.map(m => m.id).join(',')}`;
+    if (lastSequenceKeyRef.current === sequenceKey) {
       return;
     }
 
@@ -175,7 +177,7 @@ export function useSeiData(
 
         setAllSeiMessages(allMessages);
         setFps(sequenceFps);
-        lastSequenceIdRef.current = sequence.id;
+        lastSequenceKeyRef.current = sequenceKey;
 
         if (allMessages.length === 0) {
           setError('No Tesla metadata found in this video. Make sure this is a Tesla dashcam recording.');
@@ -189,7 +191,7 @@ export function useSeiData(
     };
 
     extractAllSei();
-  }, [sequence?.id]);
+  }, [sequence?.id, sequence?.clipCount]);
 
   // Find SEI data for current absolute time with GPS interpolation
   const getSeiForTime = useCallback(

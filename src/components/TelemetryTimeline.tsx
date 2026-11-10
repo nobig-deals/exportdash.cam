@@ -24,6 +24,7 @@ interface TelemetryTimelineProps {
   onTrimPreview?: (time: number | null) => void;
   cameraSegments?: CameraSegment[];
   onCameraSegmentsChange?: (segments: CameraSegment[]) => void;
+  cameraTrackActive?: boolean;  // False when the current layout/format ignores the camera track
   selectedAngle?: string;
   availableAngles?: string[];  // For drag-drop palette
 }
@@ -59,6 +60,7 @@ export function TelemetryTimeline({
   onTrimPreview,
   cameraSegments = [],
   onCameraSegmentsChange,
+  cameraTrackActive = true,
   selectedAngle,
   availableAngles = [],
 }: TelemetryTimelineProps) {
@@ -529,6 +531,9 @@ export function TelemetryTimeline({
       }));
   }, [cameraSegments, isTrimming, trimStart, trimEnd, duration]);
 
+  // Greyed out and locked when the current layout/format ignores the camera track
+  const cameraTrackLock = cameraTrackActive ? '' : 'opacity-40 grayscale pointer-events-none select-none';
+
   return (
     <div className="bg-gray-800/50 rounded-xl p-3 space-y-2">
       {/* Header */}
@@ -783,18 +788,18 @@ export function TelemetryTimeline({
         })}
       </div>
 
-      {/* === CAMERA TRACK (always visible) === */}
+      {/* === CAMERA TRACK (always visible, inactive outside Single/PiP landscape) === */}
       {cameraSegments.length > 0 && (
         <div className="border-t border-gray-700 pt-3 mt-1">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-purple-400 font-medium">Camera Track</span>
+            <span className={`text-xs font-medium ${cameraTrackActive ? 'text-purple-400' : 'text-gray-500'}`}>Camera Track</span>
             <span className="text-[10px] text-gray-500">
-              {cameraSegments.length > 1 ? 'Drag boundaries • Double-click to remove' : ''}
+              {cameraTrackActive && cameraSegments.length > 1 ? 'Drag boundaries • Double-click to remove' : ''}
             </span>
           </div>
 
           {/* Angle palette with drag instruction */}
-          <div className="flex items-center gap-2 mb-2">
+          <div className={`flex items-center gap-2 mb-2 ${cameraTrackLock}`} aria-disabled={!cameraTrackActive}>
             <div className="flex items-center gap-1">
               {availableAngles.map((angle) => (
                 <div
@@ -809,7 +814,7 @@ export function TelemetryTimeline({
                     color: 'white',
                     boxShadow: draggingAngle === angle ? 'none' : '0 2px 4px rgba(0,0,0,0.3)'
                   }}
-                  onMouseDown={(e) => handleAngleDragStart(angle, e)}
+                  onMouseDown={cameraTrackActive ? (e) => handleAngleDragStart(angle, e) : undefined}
                   title={`Drag ${ANGLE_LABELS[angle] || angle} to timeline`}
                 >
                   {ANGLE_LABELS[angle] || angle}
@@ -831,8 +836,9 @@ export function TelemetryTimeline({
               draggingAngle
                 ? 'border-purple-500 bg-purple-500/10'
                 : 'border-gray-600/50'
-            }`}
-            onMouseUp={draggingAngle ? handleCameraTrackDrop : undefined}
+            } ${cameraTrackLock}`}
+            aria-disabled={!cameraTrackActive}
+            onMouseUp={cameraTrackActive && draggingAngle ? handleCameraTrackDrop : undefined}
           >
             {visibleCameraSegments.map((segment, idx) => {
               const left = timeToPosition(segment.startTime);
@@ -870,8 +876,8 @@ export function TelemetryTimeline({
                     draggingSegmentBoundary === idx + 1 ? 'z-[10]' : ''
                   }`}
                   style={{ left: `${position}%`, transform: 'translateX(-50%)' }}
-                  onMouseDown={handleSegmentBoundaryMouseDown(idx + 1)}
-                  onDoubleClick={handleSegmentBoundaryDoubleClick(idx + 1)}
+                  onMouseDown={cameraTrackActive ? handleSegmentBoundaryMouseDown(idx + 1) : undefined}
+                  onDoubleClick={cameraTrackActive ? handleSegmentBoundaryDoubleClick(idx + 1) : undefined}
                   title="Drag to adjust • Double-click to remove"
                 >
                   <div className={`absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-1 ${
@@ -900,9 +906,11 @@ export function TelemetryTimeline({
             )}
           </div>
 
-          {/* Playback hint */}
+          {/* Playback hint, or why the track is locked */}
           <div className="text-[10px] text-gray-500 mt-1.5">
-            Press play to preview camera switches
+            {cameraTrackActive
+              ? 'Press play to preview camera switches'
+              : 'Camera track applies to Single and PiP layouts in landscape formats'}
           </div>
         </div>
       )}

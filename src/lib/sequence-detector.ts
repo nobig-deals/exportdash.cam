@@ -19,6 +19,7 @@ import {
   getReasonLabel,
   ANGLE_LABELS,
   ANGLE_ORDER,
+  formatLocalDate,
 } from '@/types/video';
 
 /** Gap threshold in seconds - clips within this gap are considered consecutive */
@@ -166,7 +167,7 @@ export async function processFilesToMoments(
     const frontVideo = videos.find(v => v.angle === 'front');
     const momentDuration = frontVideo?.duration || videos[0]?.duration || 60;
 
-    const date = validTimestamp.toISOString().split('T')[0];
+    const date = formatLocalDate(validTimestamp);
     const time = validTimestamp.toTimeString().split(' ')[0];
 
     moments.push({

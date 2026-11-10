@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, lazy, Suspense, ReactNode, useMemo } from 'react';
 import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
-import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig } from '@/types/video';
+import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig, formatLocalDate } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
 import {
   IconArrowUp,
@@ -182,6 +182,8 @@ export function VideoPlayer({
   const [showSafeZones, setShowSafeZones] = useState(false);
   const formatPreset = useMemo(() => getFormatPreset(format), [format]);
   const isPortraitFormat = formatPreset.aspectRatio > 0 && formatPreset.aspectRatio < 1;
+  // Camera track only drives Single and PiP layouts in landscape formats
+  const cameraTrackActive = !isPortraitFormat && (layout === 'single' || layout === 'pip');
 
   // Layout camera config
   const [layoutConfig, setLayoutConfig] = useState<LayoutCameraConfig>(DEFAULT_LAYOUT_CONFIG);
@@ -262,6 +264,10 @@ export function VideoPlayer({
 
   const totalDuration = sequence?.totalDuration || 0;
 
+  // Trim narrower than the sequence: keep preview playback inside it (not while editing the trim)
+  const isTrimActive = !!trimPoints && !isTrimming
+    && (trimPoints.inPoint > 0 || trimPoints.outPoint < totalDuration);
+
   // Get the main video file for SEI data
   const mainVideo = currentMoment?.videos.find(v => v.angle === 'front') || currentMoment?.videos[0];
 
@@ -280,7 +286,7 @@ export function VideoPlayer({
     return seiData;
   }, [seiData, sequence?.event]);
 
-  // Reset state when sequence changes
+  // Reset state when sequence changes (or gains clips via Add More)
   useEffect(() => {
     if (sequence && sequence.moments.length > 0) {
       setCurrentMomentIndex(0);
@@ -300,7 +306,7 @@ export function VideoPlayer({
       setCameraSegments([{ startTime: 0, endTime: sequence.totalDuration, angle: defaultAngle }]);
       setUseCustomCameraTrack(false);
     }
-  }, [sequence?.id]);
+  }, [sequence?.id, sequence?.clipCount]);
 
   // Auto-enable custom camera track when user adds segments
   useEffect(() => {
@@ -361,15 +367,34 @@ export function VideoPlayer({
   }, [selectedAngle]);
 
   const handleTimeUpdate = useCallback(() => {
-    if (mainVideoRef.current) {
-      setLocalTime(mainVideoRef.current.currentTime);
-      syncVideos();
+    const video = mainVideoRef.current;
+    if (!video) return;
+
+    // Pause at the trim out point so the preview matches the export range
+    if (isTrimActive && trimPoints && sequence && !video.paused
+      && toAbsoluteTime(sequence, currentMomentIndex, video.currentTime) >= trimPoints.outPoint) {
+      video.pause();
+      Object.values(videoRefs.current).forEach(v => v?.pause());
+      setIsPlaying(false);
+      const outLocalTime = trimPoints.outPoint - sequence.momentOffsets[currentMomentIndex];
+      if (outLocalTime >= 0) syncVideos(outLocalTime);
+      return;
     }
-  }, [syncVideos]);
+
+    setLocalTime(video.currentTime);
+    syncVideos();
+  }, [syncVideos, isTrimActive, trimPoints, sequence, currentMomentIndex]);
 
   // Handle video ended - auto-advance to next clip
   const handleVideoEnded = useCallback(() => {
     if (!sequence) return;
+
+    // Trim out point at the end of this clip: stop instead of advancing
+    const clipEnd = toAbsoluteTime(sequence, currentMomentIndex, sequence.moments[currentMomentIndex].duration);
+    if (isTrimActive && trimPoints && clipEnd >= trimPoints.outPoint - 0.05) {
+      setIsPlaying(false);
+      return;
+    }
 
     if (currentMomentIndex < sequence.moments.length - 1) {
       // Advance to next clip
@@ -380,7 +405,7 @@ export function VideoPlayer({
       // End of sequence
       setIsPlaying(false);
     }
-  }, [sequence, currentMomentIndex]);
+  }, [sequence, currentMomentIndex, isTrimActive, trimPoints]);
 
   // A clip that plays to its end fires 'pause' right before 'ended' - keep
   // isPlaying so the next clip auto-plays after handleVideoEnded advances
@@ -392,8 +417,17 @@ export function VideoPlayer({
   const pendingRestoreRef = useRef<{ time: number; playing: boolean } | null>(null);
   const shouldAutoPlayRef = useRef(false);
 
+  // A new src or remounted <video> starts at 1x, so re-apply the chosen speed on load
+  const playbackRateRef = useRef(1);
+  const applyPlaybackRate = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    video.defaultPlaybackRate = playbackRateRef.current;
+    video.playbackRate = playbackRateRef.current;
+  }, []);
+
   const handleLoadedMetadata = useCallback(() => {
     if (mainVideoRef.current) {
+      applyPlaybackRate(mainVideoRef.current);
       const { videoWidth, videoHeight } = mainVideoRef.current;
       if (videoWidth && videoHeight) {
         setVideoAspectRatio(videoWidth / videoHeight);
@@ -421,7 +455,7 @@ export function VideoPlayer({
         shouldAutoPlayRef.current = false;
       }
     }
-  }, []);
+  }, [applyPlaybackRate]);
 
   // When moment index changes, check if we should auto-play
   useEffect(() => {
@@ -433,7 +467,7 @@ export function VideoPlayer({
   // Switch cameras based on camera segments (when custom track enabled)
   // Works both during playback AND when scrubbing timeline
   useEffect(() => {
-    if (!useCustomCameraTrack || cameraSegments.length === 0) return;
+    if (!cameraTrackActive || !useCustomCameraTrack || cameraSegments.length === 0) return;
 
     // Skip while a restore is pending — the video is remounting and localTime
     // may temporarily be 0, which would cause a false switch back
@@ -449,7 +483,7 @@ export function VideoPlayer({
       pendingRestoreRef.current = { time: localTime, playing: isPlaying };
       setSelectedAngle(currentSegment.angle);
     }
-  }, [useCustomCameraTrack, absoluteTime, cameraSegments, selectedAngle, localTime, isPlaying]);
+  }, [cameraTrackActive, useCustomCameraTrack, absoluteTime, cameraSegments, selectedAngle, localTime, isPlaying]);
 
   // Custom setters that preserve playback state
   const handleLayoutChange = useCallback((newLayout: LayoutType) => {
@@ -515,12 +549,25 @@ export function VideoPlayer({
         mainVideoRef.current.pause();
         Object.values(videoRefs.current).forEach(v => v?.pause());
       } else {
+        // Outside the trimmed range: start again from the in point
+        if (isTrimActive && trimPoints && sequence
+          && (absoluteTime < trimPoints.inPoint || absoluteTime >= trimPoints.outPoint - 0.05)) {
+          const { momentIndex, localTime: inLocalTime } = findMomentForTime(sequence, trimPoints.inPoint);
+          if (momentIndex !== currentMomentIndex) {
+            // In point is in another clip: play once that clip has loaded
+            pendingRestoreRef.current = { time: inLocalTime, playing: true };
+            setCurrentMomentIndex(momentIndex);
+            setLocalTime(inLocalTime);
+            return;
+          }
+          syncVideos(inLocalTime);
+        }
         mainVideoRef.current.play();
         Object.values(videoRefs.current).forEach(v => v?.play().catch(() => {}));
       }
       setIsPlaying(!isPlaying);
     }
-  }, [isPlaying]);
+  }, [isPlaying, isTrimActive, trimPoints, sequence, absoluteTime, currentMomentIndex, syncVideos]);
 
   // Seek to absolute time (handles cross-clip seeking)
   const seekToAbsoluteTime = useCallback((targetAbsoluteTime: number) => {
@@ -558,13 +605,10 @@ export function VideoPlayer({
 
   const handlePlaybackRateChange = useCallback((rate: number) => {
     setPlaybackRate(rate);
-    if (mainVideoRef.current) {
-      mainVideoRef.current.playbackRate = rate;
-    }
-    Object.values(videoRefs.current).forEach(v => {
-      if (v) v.playbackRate = rate;
-    });
-  }, []);
+    playbackRateRef.current = rate;
+    applyPlaybackRate(mainVideoRef.current);
+    Object.values(videoRefs.current).forEach(applyPlaybackRate);
+  }, [applyPlaybackRate]);
 
   // Skip to previous/next clip
   const skipToPreviousClip = useCallback(() => {
@@ -698,7 +742,7 @@ export function VideoPlayer({
           className="w-full h-full object-contain bg-black"
           muted={!isMain}
           onTimeUpdate={isMain ? handleTimeUpdate : undefined}
-          onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
+          onLoadedMetadata={isMain ? handleLoadedMetadata : (e) => applyPlaybackRate(e.currentTarget)}
           onEnded={isMain ? handleVideoEnded : undefined}
           onPlay={isMain ? () => setIsPlaying(true) : undefined}
           onPause={isMain ? handleMainPause : undefined}
@@ -782,7 +826,7 @@ export function VideoPlayer({
                         style={{ objectPosition: slotAlign }}
                         muted={!isMain}
                         onTimeUpdate={isMain ? handleTimeUpdate : undefined}
-                        onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
+                        onLoadedMetadata={isMain ? handleLoadedMetadata : (e) => applyPlaybackRate(e.currentTarget)}
                         onEnded={isMain ? handleVideoEnded : undefined}
                         onPlay={isMain ? () => setIsPlaying(true) : undefined}
                         onPause={isMain ? handleMainPause : undefined}
@@ -1022,7 +1066,7 @@ export function VideoPlayer({
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
                   {(() => {
                     const realTime = new Date(currentMoment.timestamp.getTime() + localTime * 1000);
-                    const date = realTime.toISOString().split('T')[0];
+                    const date = formatLocalDate(realTime);
                     const time = realTime.toTimeString().split(' ')[0];
                     return <>{date} &nbsp; {time}</>;
                   })()}
@@ -1587,6 +1631,7 @@ export function VideoPlayer({
             onTrimPreview={handleTrimPreview}
             cameraSegments={cameraSegments}
             onCameraSegmentsChange={setCameraSegments}
+            cameraTrackActive={cameraTrackActive}
             selectedAngle={selectedAngle}
             availableAngles={availableAngles}
           />
