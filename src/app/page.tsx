@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { DropZone } from '@/components/DropZone';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { LoadingScreen } from '@/components/LoadingScreen';
@@ -32,31 +32,49 @@ export default function Home() {
     null
   );
 
+  // Files behind the current sequences, so "Add More" merges instead of replacing.
+  const loadedFilesRef = useRef<File[]>([]);
+
   // Run the normal processing pipeline on a set of plain (decrypted) MP4 files.
   const runPipeline = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
+
+    // Merge with the already loaded files; same name + size counts as the same file.
+    const merged = [...loadedFilesRef.current];
+    const seen = new Set(merged.map((f) => `${f.name}:${f.size}`));
+    for (const file of files) {
+      const key = `${file.name}:${file.size}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(file);
+      }
+    }
 
     setIsProcessing(true);
     setProcessingProgress({
       stage: 'scanning',
       current: 0,
-      total: files.length,
+      total: merged.length,
       message: 'Scanning files...',
     });
 
     try {
-      const { moments, events } = await processFilesToMoments(files, setProcessingProgress);
+      const { moments, events } = await processFilesToMoments(merged, setProcessingProgress);
       const detectedSequences = detectSequences(moments, events);
+      loadedFilesRef.current = merged;
       setSequences(detectedSequences);
       if (detectedSequences.length > 0) {
-        setSelectedSequence(detectedSequences[0]);
+        // Keep the current sequence selected if it still exists.
+        setSelectedSequence(
+          (prev) => detectedSequences.find((s) => s.id === prev?.id) ?? detectedSequences[0]
+        );
       }
     } catch (error) {
       console.error('Error processing videos:', error);
       setProcessingProgress({
         stage: 'error',
         current: 0,
-        total: files.length,
+        total: merged.length,
         message: 'Error processing videos',
       });
     } finally {
@@ -136,6 +154,7 @@ export default function Home() {
   );
 
   const handleClear = useCallback(() => {
+    loadedFilesRef.current = [];
     setSequences([]);
     setSelectedSequence(null);
   }, []);

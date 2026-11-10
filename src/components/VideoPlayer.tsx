@@ -286,7 +286,7 @@ export function VideoPlayer({
     return seiData;
   }, [seiData, sequence?.event]);
 
-  // Reset state when sequence changes
+  // Reset state when sequence changes (or gains clips via Add More)
   useEffect(() => {
     if (sequence && sequence.moments.length > 0) {
       setCurrentMomentIndex(0);
@@ -306,7 +306,7 @@ export function VideoPlayer({
       setCameraSegments([{ startTime: 0, endTime: sequence.totalDuration, angle: defaultAngle }]);
       setUseCustomCameraTrack(false);
     }
-  }, [sequence?.id]);
+  }, [sequence?.id, sequence?.clipCount]);
 
   // Auto-enable custom camera track when user adds segments
   useEffect(() => {
