@@ -382,6 +382,12 @@ export function VideoPlayer({
     }
   }, [sequence, currentMomentIndex]);
 
+  // A clip that plays to its end fires 'pause' right before 'ended' - keep
+  // isPlaying so the next clip auto-plays after handleVideoEnded advances
+  const handleMainPause = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (!e.currentTarget.ended) setIsPlaying(false);
+  }, []);
+
   // Track playback state for restoring after layout/angle changes
   const pendingRestoreRef = useRef<{ time: number; playing: boolean } | null>(null);
   const shouldAutoPlayRef = useRef(false);
@@ -695,7 +701,7 @@ export function VideoPlayer({
           onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
           onEnded={isMain ? handleVideoEnded : undefined}
           onPlay={isMain ? () => setIsPlaying(true) : undefined}
-          onPause={isMain ? () => setIsPlaying(false) : undefined}
+          onPause={isMain ? handleMainPause : undefined}
           onClick={() => isMain ? togglePlay() : handleAngleChange(angle)}
         />
         {isMain && layout !== 'single' && layout !== 'pip' && (
@@ -779,7 +785,7 @@ export function VideoPlayer({
                         onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
                         onEnded={isMain ? handleVideoEnded : undefined}
                         onPlay={isMain ? () => setIsPlaying(true) : undefined}
-                        onPause={isMain ? () => setIsPlaying(false) : undefined}
+                        onPause={isMain ? handleMainPause : undefined}
                         onClick={togglePlay}
                       />
                     ) : (
