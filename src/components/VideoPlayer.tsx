@@ -264,6 +264,10 @@ export function VideoPlayer({
 
   const totalDuration = sequence?.totalDuration || 0;
 
+  // Trim narrower than the sequence: keep preview playback inside it (not while editing the trim)
+  const isTrimActive = !!trimPoints && !isTrimming
+    && (trimPoints.inPoint > 0 || trimPoints.outPoint < totalDuration);
+
   // Get the main video file for SEI data
   const mainVideo = currentMoment?.videos.find(v => v.angle === 'front') || currentMoment?.videos[0];
 
@@ -363,15 +367,34 @@ export function VideoPlayer({
   }, [selectedAngle]);
 
   const handleTimeUpdate = useCallback(() => {
-    if (mainVideoRef.current) {
-      setLocalTime(mainVideoRef.current.currentTime);
-      syncVideos();
+    const video = mainVideoRef.current;
+    if (!video) return;
+
+    // Pause at the trim out point so the preview matches the export range
+    if (isTrimActive && trimPoints && sequence && !video.paused
+      && toAbsoluteTime(sequence, currentMomentIndex, video.currentTime) >= trimPoints.outPoint) {
+      video.pause();
+      Object.values(videoRefs.current).forEach(v => v?.pause());
+      setIsPlaying(false);
+      const outLocalTime = trimPoints.outPoint - sequence.momentOffsets[currentMomentIndex];
+      if (outLocalTime >= 0) syncVideos(outLocalTime);
+      return;
     }
-  }, [syncVideos]);
+
+    setLocalTime(video.currentTime);
+    syncVideos();
+  }, [syncVideos, isTrimActive, trimPoints, sequence, currentMomentIndex]);
 
   // Handle video ended - auto-advance to next clip
   const handleVideoEnded = useCallback(() => {
     if (!sequence) return;
+
+    // Trim out point at the end of this clip: stop instead of advancing
+    const clipEnd = toAbsoluteTime(sequence, currentMomentIndex, sequence.moments[currentMomentIndex].duration);
+    if (isTrimActive && trimPoints && clipEnd >= trimPoints.outPoint - 0.05) {
+      setIsPlaying(false);
+      return;
+    }
 
     if (currentMomentIndex < sequence.moments.length - 1) {
       // Advance to next clip
@@ -382,7 +405,7 @@ export function VideoPlayer({
       // End of sequence
       setIsPlaying(false);
     }
-  }, [sequence, currentMomentIndex]);
+  }, [sequence, currentMomentIndex, isTrimActive, trimPoints]);
 
   // A clip that plays to its end fires 'pause' right before 'ended' - keep
   // isPlaying so the next clip auto-plays after handleVideoEnded advances
@@ -526,12 +549,25 @@ export function VideoPlayer({
         mainVideoRef.current.pause();
         Object.values(videoRefs.current).forEach(v => v?.pause());
       } else {
+        // Outside the trimmed range: start again from the in point
+        if (isTrimActive && trimPoints && sequence
+          && (absoluteTime < trimPoints.inPoint || absoluteTime >= trimPoints.outPoint - 0.05)) {
+          const { momentIndex, localTime: inLocalTime } = findMomentForTime(sequence, trimPoints.inPoint);
+          if (momentIndex !== currentMomentIndex) {
+            // In point is in another clip: play once that clip has loaded
+            pendingRestoreRef.current = { time: inLocalTime, playing: true };
+            setCurrentMomentIndex(momentIndex);
+            setLocalTime(inLocalTime);
+            return;
+          }
+          syncVideos(inLocalTime);
+        }
         mainVideoRef.current.play();
         Object.values(videoRefs.current).forEach(v => v?.play().catch(() => {}));
       }
       setIsPlaying(!isPlaying);
     }
-  }, [isPlaying]);
+  }, [isPlaying, isTrimActive, trimPoints, sequence, absoluteTime, currentMomentIndex, syncVideos]);
 
   // Seek to absolute time (handles cross-clip seeking)
   const seekToAbsoluteTime = useCallback((targetAbsoluteTime: number) => {
